@@ -11,13 +11,17 @@ from streamlit_webrtc import webrtc_streamer, VideoTransformerBase, WebRtcMode
 # 1. Caminho para o Tesseract-OCR
 # !!! ATENÇÃO: Verifique se este caminho está correto no seu sistema !!!
 try:
-    pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+    # A linha abaixo foi REMOVIDA pois só funciona no Windows local.
+    # pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+    
+    # Esta verificação agora vai procurar o Tesseract instalado pelo packages.txt
     pytesseract.get_tesseract_version()
+    print("Tesseract-OCR localizado com sucesso.")
 except Exception as e:
-    st.error(f"Erro ao localizar o Tesseract-OCR. Verifique o caminho.")
-    st.error(f"Detalhe: {e}")
+    st.error(f"Erro ao localizar o Tesseract-OCR. O Tesseract-OCR não está instalado ou não está no PATH do sistema.")
+    st.error(f"Se estiver fazendo deploy no Streamlit Cloud, verifique se 'tesseract-ocr' está no seu arquivo 'packages.txt'.")
+    st.error(f"Detalhe do Erro: {e}")
     st.stop()
-
 # 2. Carregar o Detector Haar Cascade (substituindo o YOLO)
 @st.cache_resource
 def carregar_cascade():
