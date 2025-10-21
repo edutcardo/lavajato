@@ -3,7 +3,10 @@
   "builds": [
     {
       "src": "api/index.py",
-      "use": "@vercel/python"
+      "use": "@vercel/python",
+      "config": {
+        "includeFiles": ["haarcascade_russian_plate_number.xml"]
+      }
     }
   ],
   "routes": [
@@ -11,6 +14,5 @@
       "src": "/(.*)",
       "dest": "/api/index.py"
     }
-  ],
-  "includeFiles": ["haarcascade_russian_plate_number.xml"]
+  ]
 }
