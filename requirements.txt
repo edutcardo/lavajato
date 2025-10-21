@@ -1,6 +1,9 @@
-streamlit
-streamlit-webrtc
-pytesseract
+
+fastapi
+uvicorn
 opencv-python-headless
 imutils
-av
+numpy
+easyocr
+python-multipart
+aiofiles
