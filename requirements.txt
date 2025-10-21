@@ -1,5 +1,6 @@
 streamlit
+streamlit-webrtc
 pytesseract
 opencv-python-headless
 imutils
-streamlit-webrtc
+av

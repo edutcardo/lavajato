@@ -2,27 +2,32 @@ import cv2
 import pytesseract
 import re
 from collections import Counter
-import imutils
+import imutils  # Certifique-se de ter 'imutils' no requirements.txt
 import streamlit as st
 from streamlit_webrtc import webrtc_streamer, VideoTransformerBase, WebRtcMode
 
 # --- Configuração Inicial ---
 
-# 1. Caminho para o Tesseract-OCR
-# !!! ATENÇÃO: Verifique se este caminho está correto no seu sistema !!!
+# 1. Caminho para o Tesseract-OCR (IMPORTANTE PARA DEPLOY)
+# Esta seção detecta se estamos no Streamlit Cloud (Linux) ou local (Windows)
 try:
-    # A linha abaixo foi REMOVIDA pois só funciona no Windows local.
-    # pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
-    
-    # Esta verificação agora vai procurar o Tesseract instalado pelo packages.txt
+    # Tenta encontrar o Tesseract instalado via packages.txt (Linux/Streamlit Cloud)
     pytesseract.get_tesseract_version()
-    print("Tesseract-OCR localizado com sucesso.")
+    print("Tesseract-OCR (do PATH) localizado com sucesso.")
 except Exception as e:
-    st.error(f"Erro ao localizar o Tesseract-OCR. O Tesseract-OCR não está instalado ou não está no PATH do sistema.")
-    st.error(f"Se estiver fazendo deploy no Streamlit Cloud, verifique se 'tesseract-ocr' está no seu arquivo 'packages.txt'.")
-    st.error(f"Detalhe do Erro: {e}")
-    st.stop()
-# 2. Carregar o Detector Haar Cascade (substituindo o YOLO)
+    try:
+        # Se falhar, tenta o caminho fixo do Windows (para rodar local)
+        pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+        pytesseract.get_tesseract_version()
+        print("Tesseract-OCR (do C:) localizado com sucesso.")
+    except Exception as e_win:
+        st.error(f"Erro ao localizar o Tesseract-OCR.")
+        st.error(f"Se estiver no Streamlit Cloud, adicione 'tesseract-ocr' ao 'packages.txt'.")
+        st.error(f"Se estiver local, verifique o caminho: {e_win}")
+        st.stop()
+
+
+# 2. Carregar o Detector Haar Cascade
 @st.cache_resource
 def carregar_cascade():
     cascade_path = 'haarcascade_russian_plate_number.xml'
@@ -46,12 +51,12 @@ PLATE_REGEX = r'^[A-Z]{3}[0-9][A-Z][0-9]{2}$|^[A-Z]{3}[0-9]{4}$'
 MAPA_LETRA_NUM = {'O': '0', 'D': '0', 'Q': '0', 'I': '1', 'L': '1', 'Z': '2', 'S': '5', 'G': '6', 'B': '8'}
 MAPA_NUM_LETRA = {'0': 'D', '1': 'I', '2': 'Z', '5': 'S', '6': 'G', '8': 'B'}
 
-# --- Configurações de Otimização e Estabilização ---
+# --- Configurações de Otimização e Estabilização (do seu script local) ---
 QTD_FRAMES_PARA_RESET = 30
 QTD_VOTOS_PARA_CONFIRMAR = 5
 MAX_HISTORICO = 20
 FRAME_WIDTH = 640
-FRAME_SKIP_OCR = 5
+FRAME_SKIP_OCR = 5  # <--- Otimização Chave: Só roda OCR a cada 5 frames
 
 # --- Funções de Processamento (Puras) ---
 
@@ -90,19 +95,18 @@ def corrigir_placa(texto_ocr):
     return None
 
 def processar_ocr(plate_roi_gray):
-    """Aplica pré-processamento e extrai texto da imagem da placa."""
+    """
+    Aplica pré-processamento (do seu script local) e extrai texto.
+    """
     try:
-        # Aumenta a escala para melhorar a leitura
-        scale = 3
-        w, h = plate_roi_gray.shape[1], plate_roi_gray.shape[0]
-        plate_roi_resized = cv2.resize(plate_roi_gray, (w*scale, h*scale), interpolation=cv2.INTER_CUBIC)
+        # 1. Aumenta o contraste (igual ao seu script local)
+        plate_roi_contrast = cv2.equalizeHist(plate_roi_gray)
         
-        # Aumenta o contraste
-        plate_roi_contrast = cv2.equalizeHist(plate_roi_resized)
+        # 2. Binarização (preto e branco) (igual ao seu script local)
+        _, plate_thresh = cv2.threshold(plate_roi_contrast, 0, 255, 
+                                        cv2.THRESH_BINARY | cv2.THRESH_OTSU)
         
-        # Binarização (preto e branco)
-        _, plate_thresh = cv2.threshold(plate_roi_contrast, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
-        
+        # 3. Roda o Tesseract
         text = pytesseract.image_to_string(plate_thresh, config=TESS_CONFIG)
         
         if text.strip():
@@ -117,6 +121,7 @@ def processar_ocr(plate_roi_gray):
 class PlateTransformer(VideoTransformerBase):
     def __init__(self):
         # Inicializa o estado da sessão para guardar as variáveis
+        # (equivalente às suas variáveis globais no script local)
         if "historico" not in st.session_state:
             st.session_state.historico = []
         if "frames_sem" not in st.session_state:
@@ -130,47 +135,60 @@ class PlateTransformer(VideoTransformerBase):
         # Converte o frame para o formato do OpenCV
         img = frame.to_ndarray(format="bgr24")
         
+        # --- LÓGICA DE OTIMIZAÇÃO (DO SEU SCRIPT LOCAL) ---
+        
         st.session_state.frame_count += 1
         
+        # 1. Otimização de Velocidade: Redimensiona o frame
         frame_processado = imutils.resize(img, width=FRAME_WIDTH)
+        
+        # Converte para cinza DEPOIS de redimensionar
         gray = cv2.cvtColor(frame_processado, cv2.COLOR_BGR2GRAY)
         
+        # 2. Otimização de Velocidade: Decide se roda o OCR
         rodar_ocr_neste_frame = (st.session_state.frame_count % FRAME_SKIP_OCR == 0)
         placa_lida_frame = None
         
-        # --- DETECÇÃO COM HAAR CASCADE (MAIS SIMPLES) ---
+        # --- DETECÇÃO (igual ao seu script local) ---
+        # minNeighbors=4 para ser mais sensível
         plates = plate_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4, minSize=(50, 20))
         
         for (x, y, w, h) in plates:
-            # Desenha a caixa verde de detecção
+            # Desenha a caixa verde de detecção (feedback rápido)
             cv2.rectangle(frame_processado, (x, y), (x + w, y + h), (0, 255, 0), 2)
             
+            # 3. Roda o OCR (só se for o frame certo)
             if rodar_ocr_neste_frame:
                 plate_roi_gray = gray[y:y+h, x:x+w]
                 if plate_roi_gray.size > 0:
                     placa_lida_frame = processar_ocr(plate_roi_gray)
                     if placa_lida_frame:
-                        break # Para de procurar se já achou uma placa válida
+                        # Achou uma placa válida, não precisa procurar mais
+                        break 
 
-        # --- Lógica de Estabilização (Votação) ---
+        # --- Lógica de Estabilização (Votação) (igual ao seu script local) ---
+        
         if placa_lida_frame:
             st.session_state.historico.append(placa_lida_frame)
             st.session_state.frames_sem = 0
             if len(st.session_state.historico) > MAX_HISTORICO:
                 st.session_state.historico.pop(0)
-        elif rodar_ocr_neste_frame:
+                
+        elif rodar_ocr_neste_frame: # Só conta "frame sem" se o OCR rodou
             st.session_state.frames_sem += 1
 
+        # Resetar se não houver detecção por um tempo
         if st.session_state.frames_sem > (QTD_FRAMES_PARA_RESET / FRAME_SKIP_OCR):
             st.session_state.historico.clear()
             st.session_state.placa_estavel = "Aguardando..."
 
+        # Fazer a Votação
         if st.session_state.historico:
             (placa_mais_comum, contagem) = Counter(st.session_state.historico).most_common(1)[0]
             if contagem >= QTD_VOTOS_PARA_CONFIRMAR:
                 st.session_state.placa_estavel = placa_mais_comum
 
-        # --- Desenha o resultado estável na tela ---
+        # --- Desenha o resultado estável na tela (igual ao seu script local) ---
         cor_placa = (0, 255, 0) if st.session_state.placa_estavel != "Aguardando..." else (0, 255, 255)
         cv2.rectangle(frame_processado, (0, 0), (300, 100), (0, 0, 0), -1)
         cv2.putText(frame_processado, "Placa Lida:", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
@@ -181,32 +199,28 @@ class PlateTransformer(VideoTransformerBase):
 # --- Interface Principal do Streamlit ---
 
 def main():
-    st.set_page_config(page_title="Detector de Placas (Simples)", page_icon="🚗")
-    st.title("Detector de Placas em Tempo Real")
-    st.write("Versão Simplificada (Haar Cascade + Tesseract)")
+    st.set_page_config(page_title="Detector de Placas Otimizado", page_icon="🚗")
+    st.title("Detector de Placas Otimizado")
+    st.write("Versão com otimizações de desempenho (Resize + Frame Skip).")
     st.write("Aponte a câmera do seu celular para uma placa.")
 
     webrtc_streamer(
-        key="detector-simples",
+        key="detector-otimizado",
         mode=WebRtcMode.SENDRECV,
         video_transformer_factory=PlateTransformer,
         media_stream_constraints={"video": True, "audio": False},
         async_processing=True,
     )
+    
+    # Opcional: Mostrar o status na barra lateral (pode ser removido)
+    with st.sidebar:
+        st.title("Status da Leitura")
+        if "placa_estavel" in st.session_state:
+            st.code(st.session_state.placa_estavel)
+        st.write("Histórico (últimas 20 leituras):")
+        if "historico" in st.session_state:
+            st.write(st.session_state.historico)
 
-    # Mostra o status na barra lateral
-    st.sidebar.title("Status")
-    st.sidebar.write("Placa Estável:")
-    placa_placeholder = st.sidebar.empty()
-    placa_placeholder.code(st.session_state.get("placa_estavel", "Aguardando..."))
-    
-    st.sidebar.write("Histórico de Leituras:")
-    st.sidebar.write(st.session_state.get("historico", []))
-    
-    # Hack para forçar a barra lateral a atualizar
-    if "frame_count" in st.session_state and st.session_state.frame_count % FRAME_SKIP_OCR == 0:
-        placa_placeholder.code(st.session_state.placa_estavel)
 
 if __name__ == "__main__":
     main()
-
